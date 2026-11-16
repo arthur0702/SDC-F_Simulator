@@ -28,6 +28,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -60,6 +61,7 @@ from iefb_cyclic_server import (
     MultiAxisCyclicManager,
     diagnose_local_network,
     generate_windows_netsh_script,
+    generate_windows_restore_script,
 )
 from object_dictionary import AccessType, DataType, ENCODER_PPR, SLMP_ERROR_MESSAGES, SLMPError
 from servo_axis import OpMode, PDSState, ServoAxis
@@ -685,6 +687,104 @@ class NetshScriptDialog(QDialog):
             QMessageBox.information(self, "儲存成功", f"已儲存至：\n{path}")
 
 
+class NetshRestoreScriptDialog(QDialog):
+    """一鍵產生恢復 Windows 原廠網路設定 (DHCP / 移除模擬 IP / 單一固定 IP + 清除防火牆) 批次腳本 (.bat) 對話框。"""
+
+    def __init__(self, axes: List[ServoAxis], parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self.axes = axes
+        self.setWindowTitle("產生恢復原廠網路腳本 (.bat)")
+        self.resize(760, 500)
+
+        layout = QVBoxLayout(self)
+
+        row_iface = QHBoxLayout()
+        row_iface.addWidget(QLabel("Windows 網路介面卡名稱 (如 乙太網路 / Ethernet):"))
+        self.edt_iface = QLineEdit("乙太網路")
+        self.edt_iface.textChanged.connect(self._regenerate)
+        row_iface.addWidget(self.edt_iface, 1)
+        layout.addLayout(row_iface)
+
+        row_mode = QHBoxLayout()
+        row_mode.addWidget(QLabel("恢復方式:"))
+        self.cmb_mode = QComboBox()
+        self.cmb_mode.addItem("恢復自動取得 IP (DHCP) — 清除全部靜態與多 IP", "dhcp")
+        self.cmb_mode.addItem("僅移除本模擬器綁定的多軸 IP（保留原本主 IP）", "delete_sim_ips")
+        self.cmb_mode.addItem("覆蓋重設為單一固定 IP", "static")
+        self.cmb_mode.currentIndexChanged.connect(self._on_mode_changed)
+        row_mode.addWidget(self.cmb_mode, 1)
+
+        self.chk_fw = QCheckBox("一併移除模擬器防火牆規則")
+        self.chk_fw.setChecked(True)
+        self.chk_fw.stateChanged.connect(self._regenerate)
+        row_mode.addWidget(self.chk_fw)
+        layout.addLayout(row_mode)
+
+        row_static = QHBoxLayout()
+        row_static.addWidget(QLabel("單一固定 IP:"))
+        self.edt_static_ip = QLineEdit("192.168.3.250")
+        self.edt_static_ip.setFixedWidth(140)
+        self.edt_static_ip.textChanged.connect(self._regenerate)
+        row_static.addWidget(self.edt_static_ip)
+        row_static.addWidget(QLabel("子網路遮罩:"))
+        self.edt_static_mask = QLineEdit("255.255.255.0")
+        self.edt_static_mask.setFixedWidth(140)
+        self.edt_static_mask.textChanged.connect(self._regenerate)
+        row_static.addWidget(self.edt_static_mask)
+        row_static.addStretch()
+        layout.addLayout(row_static)
+
+        self.txt_script = QPlainTextEdit()
+        self.txt_script.setReadOnly(True)
+        layout.addWidget(self.txt_script, 1)
+
+        btns = QHBoxLayout()
+        btn_copy = QPushButton("複製腳本至剪貼簿")
+        btn_copy.setObjectName("primaryBtn")
+        btn_copy.clicked.connect(self._copy_clipboard)
+        btn_save = QPushButton("另存為 .bat 腳本")
+        btn_save.clicked.connect(self._save_bat)
+        btn_close = QPushButton("關閉")
+        btn_close.clicked.connect(self.accept)
+        btns.addWidget(btn_copy)
+        btns.addWidget(btn_save)
+        btns.addStretch()
+        btns.addWidget(btn_close)
+        layout.addLayout(btns)
+
+        self._on_mode_changed()
+
+    def _on_mode_changed(self) -> None:
+        is_static = self.cmb_mode.currentData() == "static"
+        self.edt_static_ip.setEnabled(is_static)
+        self.edt_static_mask.setEnabled(is_static)
+        self._regenerate()
+
+    def _regenerate(self) -> None:
+        script = generate_windows_restore_script(
+            self.axes,
+            interface_name=self.edt_iface.text().strip() or "Ethernet",
+            mode=str(self.cmb_mode.currentData() or "dhcp"),
+            static_ip=self.edt_static_ip.text().strip() or "192.168.3.250",
+            static_mask=self.edt_static_mask.text().strip() or "255.255.255.0",
+            remove_firewall=self.chk_fw.isChecked(),
+        )
+        self.txt_script.setPlainText(script)
+
+    def _copy_clipboard(self) -> None:
+        QApplication.clipboard().setText(self.txt_script.toPlainText())
+        QMessageBox.information(self, "已複製", "已將恢復網路腳本複製到剪貼簿，請以系統管理員身分執行。")
+
+    def _save_bat(self) -> None:
+        path, _ = QFileDialog.getSaveFileName(
+            self, "儲存 Windows 恢復網路腳本", "restore_sdcf_network.bat", "Batch Files (*.bat)"
+        )
+        if path:
+            with open(path, "w", encoding="utf-8", newline="") as f:
+                f.write(self.txt_script.toPlainText())
+            QMessageBox.information(self, "儲存成功", f"已儲存至：\n{path}")
+
+
 class SDCFSymulatorMainWindow(QMainWindow):
     """士林電機 SDC-F 多軸模擬器主視窗，負責整合物理運動排程、網路伺服器與右側監控面板。"""
 
@@ -811,6 +911,10 @@ class SDCFSymulatorMainWindow(QMainWindow):
         btn_netsh.setObjectName("primaryBtn")
         btn_netsh.clicked.connect(self._show_netsh_dialog)
         row1.addWidget(btn_netsh)
+
+        btn_restore_netsh = QPushButton("產生恢復原廠網路腳本（.bat）")
+        btn_restore_netsh.clicked.connect(self._show_restore_netsh_dialog)
+        row1.addWidget(btn_restore_netsh)
 
         row1.addStretch()
         vbox.addLayout(row1)
@@ -1196,6 +1300,11 @@ class SDCFSymulatorMainWindow(QMainWindow):
     def _show_netsh_dialog(self) -> None:
         axes = [self.bundles[k].axis for k in sorted(self.bundles.keys())]
         dlg = NetshScriptDialog(axes, self)
+        dlg.exec()
+
+    def _show_restore_netsh_dialog(self) -> None:
+        axes = [self.bundles[k].axis for k in sorted(self.bundles.keys())]
+        dlg = NetshRestoreScriptDialog(axes, self)
         dlg.exec()
 
     def _on_axis_event(self, axis_id: int, msg: str) -> None:

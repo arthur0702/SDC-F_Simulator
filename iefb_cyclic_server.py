@@ -1885,3 +1885,72 @@ def generate_windows_netsh_script(
         ]
     )
     return "\r\n".join(lines)
+
+
+def generate_windows_restore_script(
+    axes: List[ServoAxis],
+    interface_name: str = "乙太網路",
+    mode: str = "dhcp",
+    static_ip: str = "192.168.3.250",
+    static_mask: str = "255.255.255.0",
+    remove_firewall: bool = True,
+) -> str:
+    """
+    產生 Windows 恢復網路與移除防火牆規則批次腳本 (.bat)：
+    - mode="dhcp"           : 恢復為自動取得 IP 與 DNS (DHCP)，清除所有多餘靜態 IP
+    - mode="delete_sim_ips" : 僅刪除目前模擬軸所綁定之靜態 IP，保留網卡原有主 IP
+    - mode="static"         : 覆蓋重設為單一指定固定 IP (static_ip / static_mask)
+    - remove_firewall=True  : 一併刪除模擬器建立之 SDC-F_CCLink_IEFB_UDP* 防火牆規則
+    """
+    lines = [
+        "@echo off",
+        "chcp 65001 > nul",
+        "echo ======================================================================",
+        "echo  Shihlin SDC-F Multi-Axis Simulator - Windows Network Restore Script",
+        "echo  Please run this script as Administrator!",
+        "echo ======================================================================",
+        "",
+        f'set IFACE="{interface_name}"',
+        "",
+    ]
+
+    if mode == "delete_sim_ips":
+        lines.append("echo [1/2] Removing Simulator Static IPs from %IFACE%...")
+        for ax in axes:
+            lines.append(
+                f'netsh interface ipv4 delete address name=%IFACE% address={ax.ip_address} > nul 2>&1'
+            )
+    elif mode == "static":
+        ip_str = static_ip.strip() or "192.168.3.250"
+        mask_str = static_mask.strip() or "255.255.255.0"
+        lines.append(f"echo [1/2] Resetting %IFACE% to Single Static IP ({ip_str})...")
+        lines.append(
+            f'netsh interface ipv4 set address name=%IFACE% source=static address={ip_str} mask={mask_str}'
+        )
+    else:
+        lines.append("echo [1/2] Restoring %IFACE% IPv4 and DNS to DHCP (Auto)...")
+        lines.append("netsh interface ipv4 set address name=%IFACE% source=dhcp")
+        lines.append("netsh interface ipv4 set dnsservers name=%IFACE% source=dhcp")
+
+    lines.append("")
+    if remove_firewall:
+        lines.extend(
+            [
+                "echo [2/2] Removing Simulator Windows Firewall Rules...",
+                'netsh advfirewall firewall delete rule name="SDC-F_CCLink_IEFB_UDP" > nul 2>&1',
+                'netsh advfirewall firewall delete rule name="SDC-F_CCLink_IEFB_UDP_OUT" > nul 2>&1',
+            ]
+        )
+    else:
+        lines.append("echo [2/2] Skipping Windows Firewall Rule removal.")
+
+    lines.extend(
+        [
+            "",
+            "echo Done! Current IP configuration:",
+            "netsh interface ipv4 show addresses name=%IFACE%",
+            "pause",
+        ]
+    )
+    return "\r\n".join(lines)
+
