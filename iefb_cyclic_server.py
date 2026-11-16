@@ -2,7 +2,7 @@
 CC-Link IE Field Basic (IEFB) 循環通訊與探索伺服器模組
 ====================================================
 
-負責處理士林電機 SDC-F 模擬器與三菱 FX5U PLC 之間的底層 UDP 通訊：
+負責處理士林電機 SDC-F 模擬器與 AX5S PLC 之間的底層 UDP 通訊：
 - UDP 61450：SLMP 3E/4E 0E70h CyclicData 循環資料交換（131B 實機 SDC-F 回應格式）
 - UDP 61451：NodeSearch (0E30h) 站台探索與 IPAddressSet (0E31h) IP 設定
 - UDP 45237：iQSS 探索與管理回應
@@ -78,7 +78,7 @@ class CyclicFrameHeader:
 
 
 
-# 實機 FX5U + SDC-F 已驗證之 SLMP 0E70h 回應格式 (131B = 11B SLMP + 48B IEFB 標頭 + 64B RWr + 8B RX)
+# 實機 AX5S + SDC-F 已驗證之 SLMP 0E70h 回應格式 (131B = 11B SLMP + 48B IEFB 標頭 + 64B RWr + 8B RX)
 SLMP_0E70_PROBE_ORDER: Tuple[str, ...] = (
     "slmp11_real_sdcf_48b_wfirst",
     "slmp11_real_sdcf_48b",
@@ -161,7 +161,7 @@ class CyclicFrameStats:
 class CyclicFrameCodec:
     """
     CC-Link IE Field Basic 循環封包編解碼器（UDP Port 61450）：
-    - 解析三菱 FX5U SLMP 3E/4E Binary Command 0E70h CyclicData 請求（[RWw 64B*N][RY 8B*N]）
+    - 解析 AX5S SLMP 3E/4E Binary Command 0E70h CyclicData 請求（[RWw 64B*N][RY 8B*N]）
     - 組裝與實機 SDC-F 1:1 一致之 131B 0E70h 回應封包（[RWr 64B][RX 8B]）
     - 相容傳統 Ver 1 / Ver 2 及極簡 72B 測試封包
     """
@@ -311,7 +311,7 @@ class CyclicFrameCodec:
             hdr = CyclicFrameHeader(header_len=0, total_stations=1, raw_header=b"")
             return data[0:8], data[8:72], hdr
 
-        # Check for real SLMP 3E/4E CyclicData (0E70h) frame from FX5U PLC
+        # Check for real SLMP 3E/4E CyclicData (0E70h) frame from AX5S PLC
         slmp_info = cls.detect_slmp_0e70(data)
         if slmp_info is not None:
             slmp_hdr_len = slmp_info[1]
@@ -324,7 +324,7 @@ class CyclicFrameCodec:
             total_stations = 0
             header_len = 0
 
-            # Exact FX5U 0E70h Ver 2 layout: Read TotalSlaves at p+off_val+10 (byte 61..62)
+            # Exact AX5S 0E70h Ver 2 layout: Read TotalSlaves at p+off_val+10 (byte 61..62)
             # Header = 15 (SLMP) + off_val (36) + 16 (CyclicInfo) + 4*N (SlaveIPs) = 67 + 4*N
             if pkt_len >= ip_table_start + STATION_TOTAL_BYTES:
                 n_slaves = struct.unpack_from("<H", data, p + off_val + 10)[0]
@@ -379,7 +379,7 @@ class CyclicFrameCodec:
                 ry_off = base
                 rww_off = base + STATION_BIT_BYTES
             else:
-                # Proven from FX5U SLMP 0E70h capture: [RWw (64B * N)][RY (8B * N)]
+                # Proven from AX5S SLMP 0E70h capture: [RWw (64B * N)][RY (8B * N)]
                 # (@71..134 = RWw, @135..142 = RY where @142 MSB 0x80 = RY3F CSR)
                 rww_off = header_len + (sta_idx * STATION_WORD_BYTES)
                 ry_off = header_len + (total_stations * STATION_WORD_BYTES) + (sta_idx * STATION_BIT_BYTES)
@@ -498,7 +498,7 @@ class CyclicFrameCodec:
         packing_layout: CyclicPackingLayout = CyclicPackingLayout.INTERLEAVED,
         master_timestamp: int = 0x2033FB25,
     ) -> bytes:
-        """Build a Mitsubishi FX5U SLMP 3E (50 00 ... 70 0E 00 00) CyclicData Request (Ver 2)."""
+        """Build an AX5S SLMP 3E (50 00 ... 70 0E 00 00) CyclicData Request (Ver 2)."""
         n_sta = max(len(ry_list), len(rww_list), 1)
         norm_ry = [
             (ry_list[i] if i < len(ry_list) else b"\x00" * 8).ljust(8, b"\x00")[:8]
@@ -569,7 +569,7 @@ class CyclicFrameCodec:
         rwr_padded: bytes,
     ) -> bytes:
         """
-        依實機 FX5U + SDC-F 驗證格式組裝 131B SLMP 0E70h 從站回應封包：
+        依實機 AX5S + SDC-F 驗證格式組裝 131B SLMP 0E70h 從站回應封包：
         - SLMP 3E 回應標頭 (11B)：0x00D0 + Routing(5B) + DataLen(2B=0x007A) + EndCode(2B=0x0000)
         - IEFB 回應標頭 (48B)：ProtoVer(2B) + EndCode(2B) + Offset=40(4B) + Reserved(12B) +
           VendorInfo(20B: Vendor=0x0370, Product=0x000D, Type=1, Occ=1, 0) + SlaveIP_LE(4B) + Group(2B) + Seq(2B)
@@ -719,8 +719,8 @@ class _IEFBCyclicProtocol(asyncio.DatagramProtocol):
         """
         Select SLMP 0E70h response profile.
         - 'slmp11_real_sdcf_auto': uses the verified 131B SDC-F header, starting with
-          [RWr(64B)][RX(8B)] ('wfirst') symmetric to FX5U [RWw(64B)][RY(8B)], and watches
-          CSR (RY3F): if FX5U drops CSR after ~5s SSR timeout, auto-flips to [RX][RWr].
+          [RWr(64B)][RX(8B)] ('wfirst') symmetric to AX5S [RWw(64B)][RY(8B)], and watches
+          CSR (RY3F): if AX5S drops CSR after ~5s SSR timeout, auto-flips to [RX][RWr].
           Locks permanently once CSR holds >= 6.5s or user RY data arrives.
         """
         cfg_prof = getattr(self.cfg, "slmp_resp_profile", "slmp11_real_sdcf_48b_wfirst") or "slmp11_real_sdcf_48b_wfirst"
@@ -744,7 +744,7 @@ class _IEFBCyclicProtocol(asyncio.DatagramProtocol):
                 if stats.csr_high_since == 0.0:
                     stats.csr_high_since = now
                     return prof, (
-                        f"[Cyclic-61450 CSR=1] 收到 FX5U CSR 啟動，回應 SSR 採用格式: {prof}"
+                        f"[Cyclic-61450 CSR=1] 收到 AX5S CSR 啟動，回應 SSR 採用格式: {prof}"
                     )
                 held_s = now - stats.csr_high_since
                 if user_ry_active or held_s >= 6.5:
@@ -776,7 +776,7 @@ class _IEFBCyclicProtocol(asyncio.DatagramProtocol):
             stats.locked_resp_profile = prof
             stats.active_resp_profile = prof
             return prof, (
-                f"[Cyclic-61450 LOCKED] FX5U 已連線並送出 RY! 鎖定回應格式: {prof} "
+                f"[Cyclic-61450 LOCKED] AX5S 已連線並送出 RY! 鎖定回應格式: {prof} "
                 f"(RY={ry_bytes.hex(' ').upper()})"
             )
 
@@ -1362,7 +1362,7 @@ class MultiAxisCyclicManager:
     """
     協調多台模擬伺服軸與其 UDP 61450/61451/5010/45237 及 TCP 5010 伺服器：
     - 支援多軸獨立綁定靜態 IP（例如 192.168.3.1, .2, ...）
-    - 自動開啟 0.0.0.0 廣播伴隨接聽器，確保 FX5U 廣播式 0E70h / 0E30h 封包不漏接
+    - 自動開啟 0.0.0.0 廣播伴隨接聽器，確保 AX5S 廣播式 0E70h / 0E30h 封包不漏接
     - 透過來源軸 IP Socket 回覆並搭配跨 Socket 30ms 去重，避免重複計數與 ARP 錯位
     """
 
@@ -1416,7 +1416,7 @@ class MultiAxisCyclicManager:
     async def start_broadcast_listeners(self) -> List[str]:
         """
         Bind companion 0.0.0.0:61450 & 0.0.0.0:61451 broadcast dispatchers whenever axes are
-        bound to specific static IPs so FX5U broadcast 0E70h / 0E30h packets are never dropped.
+        bound to specific static IPs so AX5S broadcast 0E70h / 0E30h packets are never dropped.
         """
         self.stop_broadcast_listeners()
         msgs: List[str] = []
@@ -1632,7 +1632,7 @@ async def probe_real_servo_0e70(
     client_bind_port: Optional[int] = None,
 ) -> Tuple[bool, Optional[bytes], List[str]]:
     """
-    Temporarily act as a CC-Link IEFB Master (FX5U) and send exact 143B SLMP 3E 0E70h
+    Temporarily act as a CC-Link IEFB Master (AX5S) and send exact 143B SLMP 3E 0E70h
     cyclic polls to a physical SDC-F servo drive to capture its real UDP 61450 response bytes.
     Returns (success, first_reply_bytes, diagnostic_log_lines).
     """
@@ -1720,7 +1720,7 @@ async def probe_real_servo_0e70(
             ry_idle = b"\x00" * STATION_BIT_BYTES
             ry_csr = bytes.fromhex("00 00 00 00 00 00 00 80")
             # Send 3 CSR=0 warmup polls, then sustain CSR=1 cyclic polls at 25ms intervals
-            # with advancing master_timestamp and consistent FX5U scan/timeout header (500ms/3).
+            # with advancing master_timestamp and consistent AX5S scan/timeout header (500ms/3).
             warmup_polls = 3
             max_polls = max(60, send_count)
             ssr_seen = False
@@ -1829,7 +1829,7 @@ async def probe_real_servo_0e70(
                     )
             logs.append(
                 "  [提示] 探測停止發送 0E70h 後約 1 秒，實機 SDC-F 因主站通訊中斷監控 (PC.41) 跳 AL.4A 屬正常現象；"
-                "重新接回 FX5U 或斷電重送即可清除。"
+                "重新接回 AX5S 或斷電重送即可清除。"
             )
             return True, first_rx, logs
         finally:

@@ -1,7 +1,7 @@
 # 士林電機 SDC-F 多軸伺服驅動器模擬器 (CC-Link IE Field Basic + SLMP)
 
 一套使用純 Python（`PySide6` + `qasync` + `asyncio`）開發的 **士林電機（Shihlin Electric）SDC-F 系列伺服驅動器多軸模擬器**。  
-本工具可直接在 Windows PC 上模擬 1 至 8 軸支援 **CC-Link IE Field Basic (IEFB)** 與 **SLMP** 通訊協定的伺服驅動器，與三菱電機 **FX5U PLC** 及 **GX Works3** 進行真實乙太網路循環通訊與運動控制功能塊（FB）驗證，無須接實體馬達即可測試 PLC 順控與運動邏輯。
+本工具可直接在 Windows PC 上模擬 1 至 8 軸支援 **CC-Link IE Field Basic (IEFB)** 與 **SLMP** 通訊協定的伺服驅動器，與 **AX5S PLC** 及 **GX Works3** 進行真實乙太網路循環通訊與運動控制功能塊（FB）驗證，無須接實體馬達即可測試 PLC 順控與運動邏輯。
 
 ---
 
@@ -21,7 +21,7 @@
 
 ## 核心特色
 
-1. **真實對接三菱 FX5U PLC 與 GX Works3**
+1. **真實對接實機 AX5S PLC 與 GX Works3**
    - 支援 **SLMP 3E/4E Binary (`0E70h` CyclicData)** 循環通訊，完整實作經過實機 SDC-F 驗證的 **131 Bytes `wfirst` 回應格式**（`11B SLMP + 48B IEFB + 64B RWr + 8B RX`）。
    - 支援 **NodeSearch (`0E30h`) / IPAddressSet (`0E31h`)** 站台搜尋與 **iQSS (`45237`)** 裝置探索，可直接出現在 GX Works3「CC-Link IEF Basic 網路組態」自動偵測清單中。
    - 同時支援 **UDP 5010 與 TCP 5010** 之 **SLMP `4020h`** 物件字典讀寫（單筆讀寫 `0001h`/`0002h` 與 SubID 區塊讀寫 `0005h`/`0006h`）。
@@ -49,7 +49,7 @@
 | **UDP / TCP 5010** | SLMP `4020h` | 物件字典非週期性參數讀寫（`0001h`/`0002h`/`0005h`/`0006h`） |
 | **UDP 45237** | iQSS Discovery | 三菱 iQ Sensor Solution 網路搜尋與識別回應 |
 
-### 已實機驗證支援之運動控制功能塊（FX5U + GX Works3）
+### 已實機驗證支援之運動控制功能塊（AX5S + GX Works3）
 
 #### 三菱官方運動控制 FB（`MC_*_CCLinkIEFBasic_F`）
 - `MC_Power_CCLinkIEFBasic_F`（Servo ON / OFF，`RY3F`/`RX3F`/`RX3E` 與 CiA 402 PDS 切換）
@@ -72,6 +72,7 @@
 ├── slmp_server.py                     # UDP/TCP 5010 SLMP 3E/4E 封包解析與 4020h 測試客戶端
 ├── servo_axis.py                      # CiA 402 狀態機、PP/PV/PT/HM 物理引擎與極限/異警模擬
 ├── object_dictionary.py               # SDC-F 物件字典 (1000h~6FFFh) 與 Mode 1/2/3 PDO 映射
+├── AX5S_2軸_測試程式.gx3              # 實機 AX5S PLC 測試用 GX Works3 範例專案（2 軸組態測試）
 ├── README.md                          # 專案使用說明、授權與聲明文件
 ├── LICENSE                            # MIT 授權條款全文
 └── DEV_AND_TROUBLESHOOTING_REPORT.md  # 完整開發架構與實機對接問題排除報告
@@ -100,9 +101,9 @@ python main_gui.py
 
 ## 使用說明
 
-### 1. 設定 Windows 多 IP 與防火牆（對接實體 FX5U 時必做）
+### 1. 設定 Windows 多 IP 與防火牆（對接實體 AX5S 時必做）
 
-1. 將電腦有線乙太網卡接上與 FX5U PLC 相連的交換器或直連網線（預設 PLC 主站常見為 `192.168.3.250`，子網路遮罩 `255.255.255.0`）。
+1. 將電腦有線乙太網卡接上與 AX5S PLC 相連的交換器或直連網線（預設 PLC 主站常見為 `192.168.3.250`，子網路遮罩 `255.255.255.0`）。
 2. 在模擬器上方設定 **軸數**（例如 `1` 或 `2`）與 **起始 IP**（例如 `192.168.3.1` 或避開路由器閘道的 `192.168.3.11`）。
 3. 點擊 **「一鍵產生 Windows 多 IP 與防火牆腳本」**，輸入您的 Windows 網卡名稱（預設 `乙太網路`，英文系統請改為 `Ethernet`），另存或複製為 `.bat` 檔後，**以系統管理員身分執行**。
 4. 回到模擬器點擊 **「啟動全部通訊埠」**（程式啟動時亦會自動嘗試啟動）。當軸卡片右上角顯示 `UDP: ON` 且 `CSR(RY)`、`SSR(RX)` 亮綠/藍燈時，代表循環通訊已建立成功。
@@ -110,11 +111,11 @@ python main_gui.py
 
 > **注意事項**：若區域網路中已有路由器/閘道器佔用 `192.168.3.1`，建議將起始 IP 改為 `192.168.3.11`（並在 GX Works3 對應修改從站 IP），避免 ARP 位址衝突導致 PLC 回報 `CFE8` 無回應。
 
-### 2. GX Works3 網路組態設定
+### 2. GX Works3 網路組態設定（附測試專案 `AX5S_2軸_測試程式.gx3`）
 
-1. 於 GX Works3 開啟 `導覽 -> 參數 -> 模組參數 -> 乙太網路埠 -> 基本設定 -> CC-Link IEF Basic 設定`。
+1. 可直接以 GX Works3 開啟本專案根目錄附帶之 **`AX5S_2軸_測試程式.gx3`** 作為 AX5S PLC 測試範例，或自行建立專案並開啟 `導覽 -> 參數 -> 模組參數 -> 乙太網路埠 -> 基本設定 -> CC-Link IEF Basic 設定`。
 2. 點擊 **「網路組態設定」**，可使用 **「連線機器自動偵測」** 透過 UDP `61451` (`0E30h`) 直接搜尋到模擬的 `SDC-F` 軸，或手動拖曳 `SDC-F` CSP+ 裝置至拓樸並設定相同 IP（佔用站數 1 站，RX/RY 64 點、RWr/RWw 32 字）。
-3. 確認套用並將參數寫入 FX5U PLC，重新上電或 RUN 後即可透過三菱標準 FB 控制模擬軸。
+3. 確認套用並將參數寫入 AX5S PLC，重新上電或 RUN 後即可透過運動控制 FB 操作模擬軸。
 
 ### 3. 參數切換與診斷面板操作
 
@@ -134,7 +135,7 @@ python main_gui.py
 
 ## 開發與問題排除報告
 
-完整的協議逆向工程分析、多軸網路設計以及與 FX5U / 實體 SDC-F 對接過程中解決的所有關鍵問題（包含 `0E70h` 131B `wfirst` 格式對齊、`RX3E` 解決 `Error 4611`、`2D11h`/`2D12h` 狀態位元、`2D20h` 限速邊界、`4020h` 讀取長度對齊與電子齒輪換算），請參閱：
+完整的協議逆向工程分析、多軸網路設計以及與 AX5S / 實體 SDC-F 對接過程中解決的所有關鍵問題（包含 `0E70h` 131B `wfirst` 格式對齊、`RX3E` 解決 `Error 4611`、`2D11h`/`2D12h` 狀態位元、`2D20h` 限速邊界、`4020h` 讀取長度對齊與電子齒輪換算），請參閱：
 
 👉 **[DEV_AND_TROUBLESHOOTING_REPORT.md](./DEV_AND_TROUBLESHOOTING_REPORT.md)**
 
@@ -153,7 +154,7 @@ python main_gui.py
 
 ## AI 協助開發聲明
 
-本專案在設計架構、通訊協議封包解析與重組、CiA 402 狀態機模擬邏輯、PySide6 圖形化介面實作、繁體中文程式碼註解撰寫，以及對接實體三菱 FX5U PLC 與士林 SDC-F 伺服時的除錯分析過程中，均有採用 **生成式 AI 程式開發助手** 協助撰寫程式碼、整理封包 HEX 比對及產生技術文件。所有通訊相容性與運動功能塊驗證均經過實體 FX5U PLC 與現場抓包比對確認。
+本專案在設計架構、通訊協議封包解析與重組、CiA 402 狀態機模擬邏輯、PySide6 圖形化介面實作、繁體中文程式碼註解撰寫，以及對接實體 AX5S PLC 與士林 SDC-F 伺服時的除錯分析過程中，均有採用 **生成式 AI 程式開發助手** 協助撰寫程式碼、整理封包 HEX 比對及產生技術文件。所有通訊相容性與運動功能塊驗證均經過實體 AX5S PLC 與現場抓包比對確認。
 
 ---
 
@@ -163,12 +164,13 @@ python main_gui.py
 
 1. **士林電機 (Shihlin Electric) 公開技術手冊與描述檔**
    - `SDC-F` 系列交流伺服驅動器 CC-Link IE Field Basic 通訊手冊（PA53 / PA54、Mode 1 / Mode 2 / Mode 3 PDO 映射、2000h~2FFFh 廠商擴充物件與 `2D11h`/`2D12h`/`2D20h` 定義）
+   - 士林電機 `AX5S` PLC 相關 CC-Link IE Field Basic 應用環境與測試範例（搭配 `AX5S_2軸_測試程式.gx3`）
    - 士林電機 CSP+ 裝置描述檔：`0x0370_SDC-F_E_CCIEFBasic__1_en.xml`（Vendor Code `0x0370`、Product ID `0x000D`、通訊逾時與車站佔用數定義）
 2. **CLPA (CC-Link Partner Association) 與三菱電機公開規範**
    - CC-Link IE Field Basic (SLMP `0E70h` CyclicData、`0E30h` NodeSearch、`0E31h` IPAddressSet) 通訊協定結構
    - SLMP (Seamless Message Protocol) 3E/4E Binary Frame 與 Command `4020h` 物件字典存取規範
-   - 三菱電機 MELSEC iQ-F `FX5U` 與 CC-Link IEF Basic 專用運動控制功能塊（`MC_*_CCLinkIEFBasic_F`）公開應用手冊及錯誤碼定義（如 Error `4611h` / `CFE8h`）
+   - 三菱電機 GX Works3 與 CC-Link IEF Basic 專用運動控制功能塊（`MC_*_CCLinkIEFBasic_F`）公開應用手冊及錯誤碼定義（如 Error `4611h` / `CFE8h`）
 3. **CiA (CAN in Automation) 公開標準**
    - **CiA 402 (IEC 61800-7)** Drives and Motion Control Device Profile（PDS 狀態機、`6040h`/`6041h` 控制/狀態字、`6060h`/`6061h` 操作模式、PP/PV/PT/HM 物件定義）
 4. **實機封包擷取與對照驗證**
-   - 由開發與測試團隊於實體三菱 `FX5U` PLC 與實體士林 `SDC-F` 伺服驅動器之間，透過系統日誌與封包探測所實測比對之 `0E70h`（131B `wfirst` 回包）、`RX3E/RX3F`（`0xC0`）及 `4020h` 實際通訊特徵。
+   - 由開發與測試團隊於實體 `AX5S` PLC 與實體士林 `SDC-F` 伺服驅動器之間，透過系統日誌與封包探測所實測比對之 `0E70h`（131B `wfirst` 回包）、`RX3E/RX3F`（`0xC0`）及 `4020h` 實際通訊特徵。

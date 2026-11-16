@@ -1236,7 +1236,7 @@ class SDCFSymulatorMainWindow(QMainWindow):
         if bundle.cyclic_server.bound_ip == "127.0.0.1":
             self._append_log(
                 f"[警告 Axis {bundle.axis.axis_id}] 61450 僅綁定到 127.0.0.1 回環位址，"
-                "外部 FX5U PLC 封包將無法送達！請確認網卡 IP 或點擊「一鍵產生 Windows 多 IP 與防火牆腳本」。"
+                "外部 AX5S PLC 封包將無法送達！請確認網卡 IP 或點擊「一鍵產生 Windows 多 IP 與防火牆腳本」。"
             )
         bcast_msgs = await self.net_manager.start_broadcast_listeners()
         for bm in bcast_msgs:

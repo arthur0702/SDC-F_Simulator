@@ -1,6 +1,6 @@
 # 士林電機 SDC-F 多軸伺服模擬器 — 開發架構與問題排除工程報告
 
-本報告完整記錄「士林電機 SDC-F 多軸伺服驅動器模擬器（CC-Link IE Field Basic + SLMP）」從系統架構設計、與實體三菱 FX5U PLC 及實體 SDC-F 伺服對接除錯，到最終順利通過三菱官方 FB（`MC_Power`、`MC_Home`、`MC_MoveRelative`、`MC_MoveVelocity_CCLinkIEFBasic_F` 等）與非官方／自訂 `MC_Jog` 功能塊驗證的完整開發與問題排除歷程。
+本報告完整記錄「士林電機 SDC-F 多軸伺服驅動器模擬器（CC-Link IE Field Basic + SLMP）」從系統架構設計、與實體 AX5S PLC（`AX5S_2軸_測試程式.gx3`）及實體 SDC-F 伺服對接除錯，到最終順利通過三菱官方 FB（`MC_Power`、`MC_Home`、`MC_MoveRelative`、`MC_MoveVelocity_CCLinkIEFBasic_F` 等）與非官方／自訂 `MC_Jog` 功能塊驗證的完整開發與問題排除歷程。
 
 ---
 
@@ -20,11 +20,11 @@
 
 ## 二、 實機對接與問題排除完整歷程
 
-在與實體 **FX5U PLC (GX Works3)** 進行實機連線測試期間，陸續遭遇並解決了多項文件未明寫或實機與標準有細微差異的關鍵問題。以下依時間軸與技術領域詳述問題現象、根因定位與解決方案：
+在與實體 **AX5S PLC (GX Works3)** 進行實機連線測試期間，陸續遭遇並解決了多項文件未明寫或實機與標準有細微差異的關鍵問題。以下依時間軸與技術領域詳述問題現象、根因定位與解決方案：
 
-### 問題 1：FX5U 找不到模擬軸或偶發斷線 (`CFE8`)、廣播封包漏接與 `.1` IP 衝突
+### 問題 1：AX5S 找不到模擬軸或偶發斷線 (`CFE8`)、廣播封包漏接與 `.1` IP 衝突
 - **問題現象**：
-  - 多軸情境下模擬軸各自綁定 `192.168.3.1`、`192.168.3.2` 等單播 IP 時，無法收到 FX5U 送往廣播位址的 `0E30h` NodeSearch 或廣播型 `0E70h` 循環封包；若只綁 `0.0.0.0` 又可能由錯誤來源 IP 回覆，造成 PLC ARP 錯亂。
+  - 多軸情境下模擬軸各自綁定 `192.168.3.1`、`192.168.3.2` 等單播 IP 時，無法收到 AX5S 送往廣播位址的 `0E30h` NodeSearch 或廣播型 `0E70h` 循環封包；若只綁 `0.0.0.0` 又可能由錯誤來源 IP 回覆，造成 PLC ARP 錯亂。
   - 部分現場網段若剛好存在路由器或交換器佔用 `192.168.3.1`，導致 PLC `CFE8` 無回應斷線。
 - **根因分析**：
   - 在 Windows 上僅綁定特定單播 IPv4 位址的 UDP Socket 不會接收 subnet/limited broadcast 封包。
@@ -36,24 +36,24 @@
 
 ---
 
-### 問題 2：FX5U 送出 SLMP `0E70h` 但無法確立 CSR/SSR 握手（封包格式差異）
+### 問題 2：AX5S 送出 SLMP `0E70h` 但無法確立 CSR/SSR 握手（封包格式差異）
 - **問題現象**：
-  - 模擬器已收到 FX5U 傳來的 UDP 61450 封包，但 PLC 側遲遲無法完成建立連線，CSR (`RY3F`) 無法持續保持或 `SSR` 未被主站承認。
+  - 模擬器已收到 AX5S 傳來的 UDP 61450 封包，但 PLC 側遲遲無法完成建立連線，CSR (`RY3F`) 無法持續保持或 `SSR` 未被主站承認。
 - **根因分析**：
-  - 透過實機封包探測工具直連實體 **士林 SDC-F 伺服** 擷取真實回包比對，確認 FX5U 送出的 `0E70h` 請求封包並非傳統單純 24B 標頭，而是 **143 Bytes 的 SLMP 3E + Ver.2 擴充標頭**，且其 PDO 資料區順序為 **`[RWw 64B][RY 8B]`**（Word 區在前、Bit 區在後）。
-  - 相對應地，實體 SDC-F 回傳給 FX5U 的標準回包必須為精確的 **131 Bytes (`slmp11_real_sdcf_48b_wfirst`)**：
+  - 透過實機封包探測工具直連實體 **士林 SDC-F 伺服** 擷取真實回包比對，確認 AX5S 送出的 `0E70h` 請求封包並非傳統單純 24B 標頭，而是 **143 Bytes 的 SLMP 3E + Ver.2 擴充標頭**，且其 PDO 資料區順序為 **`[RWw 64B][RY 8B]`**（Word 區在前、Bit 區在後）。
+  - 相對應地，實體 SDC-F 回傳給 AX5S 的標準回包必須為精確的 **131 Bytes (`slmp11_real_sdcf_48b_wfirst`)**：
     - `0..10` (11B)：SLMP 3E 回應標頭 (`D0 00 00 FF FF 03 00 7A 00 00 00`)
     - `11..58` (48B)：IEFB Ver.2 回應標頭（`Offset=40`、`Vendor=0x0370`、`Product=0x000D`、`OccupiedStations=1`、Little-Endian SlaveIP、GroupNo、FrameSeq）
     - `59..122` (64B)：`RWr` 區（與主站請求對稱，Word 在前）
     - `123..130` (8B)：`RX` 區（Bit 在後，第 130 byte MSB 對應 `RX3F` SSR）
 - **解決方案**：
-  - 更新 `CyclicFrameCodec` 的 `extract_ry_rww()` 與 `build_slmp_0e70_profile_response()`，全面對齊實機 143B 請求解析與 131B `wfirst` 回包結構，實機接上後 FX5U 立即穩定完成 CSR/SSR 握手並鎖定掃描週期。
+  - 更新 `CyclicFrameCodec` 的 `extract_ry_rww()` 與 `build_slmp_0e70_profile_response()`，全面對齊實機 143B 請求解析與 131B `wfirst` 回包結構，實機接上後 AX5S 立即穩定完成 CSR/SSR 握手並鎖定掃描週期。
 
 ---
 
 ### 問題 3：SLMP `4020h` 非週期參數讀寫出現長度錯誤或通訊無回應
 - **問題現象**：
-  - FX5U 運動控制 FB（如寫入 `6098h`、`6099h` 或讀取參數）透過 SLMP `4020h` 存取物件字典時，遇到讀取長度對齊異常或無法連線。
+  - AX5S 運動控制 FB（如寫入 `6098h`、`6099h` 或讀取參數）透過 SLMP `4020h` 存取物件字典時，遇到讀取長度對齊異常或無法連線。
 - **根因分析**：
   1. 實機部分運動功能塊會透過 **TCP Port 5010** 而非僅 UDP 5010 發送 SLMP `4020h` 請求。
   2. SLMP `4020h` Read 回應中，`Number of Data Value` 與偶數位元組對齊規則若計算錯誤會導致主站解析失敗；且寫入 `2006h`/`2007h`（PA06/PA07 電子齒輪比）或偶數補零 (`pad`) 時需要嚴謹處理。
@@ -90,7 +90,7 @@
   - 無論是三菱官方 `MC_MoveVelocity_CCLinkIEFBasic_F` 或是非官方／自訂的 `MC_Jog` 功能塊，在送出切換 `6060h` 或啟動指令前，皆會先檢查遠端站的 `RX3E (B3E)`（Remote Ready / 初期設定完成就緒位元）是否為 ON。由於模擬器缺少 `RX3E`，FB 在第一掃描週期便直接判定驅動器通訊/初期設定未就緒，立即中止並不寫入 `6060h`（直接拋出 Error `4611`），也不會往下查詢 Port 5010。
 - **解決方案**：
   - 修正 `ServoAxis._build_rx_bytes()`（並移除舊版不完整旗標切換）：當 `self.ssr_active` 為 True 時，將 `rx[7]` 設為 **`0xC0`**（同時拉高 **Bit 7 = `RX3F` SSR** 與 **Bit 6 = `RX3E` Remote Ready**）；發生異警時再拉高 **Bit 3 = `RX3B`**（`0xC8`）。
-  - **驗證結果**：重新對接實體 FX5U PLC 測試，`B30` 顯示為 `-16384`，官方 `MC_MoveVelocity_CCLinkIEFBasic_F` 與非官方 `MC_Jog` 皆順利切換 `6060h = 3` 並正常運轉，`Error` 為 OFF (`ErrorID = 0`)，馬達位置與速度完全正常響應。
+  - **驗證結果**：重新對接實體 AX5S PLC 測試，`B30` 顯示為 `-16384`，官方 `MC_MoveVelocity_CCLinkIEFBasic_F` 與非官方 `MC_Jog` 皆順利切換 `6060h = 3` 並正常運轉，`Error` 為 OFF (`ErrorID = 0`)，馬達位置與速度完全正常響應。
 
 ---
 
